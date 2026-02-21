@@ -1,0 +1,25 @@
+{
+  "name": "codex-gemini-quick-launch",
+  "version": "1.0.0",
+  "description": "Windows quick launchers for Codex and Gemini CLIs.",
+  "license": "MIT",
+  "bin": {
+    "codex-quick-launch": "bin/codex-quick-launch.js",
+    "gemini-quick-launch": "bin/gemini-quick-launch.js"
+  },
+  "files": [
+    "bin",
+    "scripts",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "codex",
+    "gemini",
+    "launcher",
+    "quick-launch",
+    "windows"
+  ]
+}
