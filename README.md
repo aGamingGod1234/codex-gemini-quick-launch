@@ -8,7 +8,7 @@ This package installs two global commands that reuse your interactive launcher s
 ## One-command install
 
 ```powershell
-npm install -g @openai/codex @google/gemini-cli github:aGamingGod1234/codex-gemini-quick-launch
+npm install -g @openai/codex @google/gemini-cli https://codeload.github.com/aGamingGod1234/codex-gemini-quick-launch/tar.gz/refs/heads/main
 ```
 
 ## Usage
