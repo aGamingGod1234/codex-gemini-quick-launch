@@ -32,7 +32,7 @@ function pointsToQuickLaunch(filePath, quickScriptName) {
     return false;
   }
 
-  const normalized = readFileText(filePath).replace(/\\/g, '/').toLowerCase();
+  const normalized = readFileText(filePath).replace(/\\/g, '/').replace(/\/+/g, '/').toLowerCase();
   const expected = `node_modules/codex-gemini-quick-launch/bin/${quickScriptName}`.toLowerCase();
   return normalized.includes(expected);
 }
