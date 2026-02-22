@@ -1,7 +1,9 @@
-﻿param(
+param(
     [Parameter(Mandatory = $true)]
     [ValidateSet('codex', 'gemini')]
     [string]$Provider,
+    [Alias('m')]
+    [string]$Model,
     [switch]$NoLaunch
 )
 
@@ -385,6 +387,29 @@ function Join-CommandParts {
     return ($Parts | ForEach-Object { Quote-CmdArg -Arg $_ }) -join ' '
 }
 
+function Resolve-ModelSelection {
+    param(
+        [ValidateSet('codex', 'gemini')][string]$Provider,
+        [string]$InputModel,
+        [hashtable[]]$Choices,
+        [string]$MenuTitle
+    )
+
+    if ([string]::IsNullOrWhiteSpace($InputModel)) {
+        $modelIndex = Show-NumberedMenu -Title $MenuTitle -Options ($Choices | ForEach-Object { $_.Label })
+        return $Choices[$modelIndex].Value
+    }
+
+    $trimmed = $InputModel.Trim()
+    $match = $Choices | Where-Object { $_.Value -ieq $trimmed } | Select-Object -First 1
+    if ($match) {
+        return $match.Value
+    }
+
+    $supported = ($Choices | ForEach-Object { $_.Value }) -join ', '
+    throw ('Unsupported model "{0}" for provider "{1}". Supported values: {2}' -f $trimmed, $Provider, $supported)
+}
+
 function Build-LaunchParts {
     param(
         [ValidateSet('codex', 'gemini')][string]$Provider,
@@ -440,8 +465,7 @@ if ($Provider -eq 'codex') {
         @{ Label = 'gpt 5.1-max (gpt-5.1-max)'; Value = 'gpt-5.1-max' },
         @{ Label = 'gpt 5.1-mini (gpt-5.1-mini)'; Value = 'gpt-5.1-mini' }
     )
-    $modelIndex = Show-NumberedMenu -Title 'Select Codex model' -Options ($codexModels | ForEach-Object { $_.Label })
-    $modelSelection = $codexModels[$modelIndex].Value
+    $modelSelection = Resolve-ModelSelection -Provider $Provider -InputModel $Model -Choices $codexModels -MenuTitle 'Select Codex model'
 
     $reasoningOptions = @(
         @{ Label = 'low'; Value = 'low' },
@@ -460,8 +484,7 @@ else {
         @{ Label = 'gemini-2.5-flash'; Value = 'gemini-2.5-flash' },
         @{ Label = 'gemini-2.5-flash-lite'; Value = 'gemini-2.5-flash-lite' }
     )
-    $modelIndex = Show-NumberedMenu -Title 'Select Gemini model' -Options ($geminiModels | ForEach-Object { $_.Label })
-    $modelSelection = $geminiModels[$modelIndex].Value
+    $modelSelection = Resolve-ModelSelection -Provider $Provider -InputModel $Model -Choices $geminiModels -MenuTitle 'Select Gemini model'
 }
 
 $sandboxOptions = $null

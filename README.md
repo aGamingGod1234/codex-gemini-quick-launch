@@ -25,6 +25,13 @@ codex-quick-launch --no-launch
 gemini-quick-launch --no-launch
 ```
 
+Optional preselected model (skips model menu, supports `-m` or `-Model`):
+
+```powershell
+codex-quick-launch -m gpt-5.2-codex
+gemini-quick-launch -m gemini-2.5-pro
+```
+
 ## Notes
 
 - Windows only.
