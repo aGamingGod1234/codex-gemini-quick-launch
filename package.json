@@ -1,6 +1,6 @@
 {
   "name": "codex-gemini-quick-launch",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Windows command-only quick launchers for Codex and Gemini CLIs.",
   "license": "MIT",
   "scripts": {

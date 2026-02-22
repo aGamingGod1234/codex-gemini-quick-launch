@@ -54,4 +54,5 @@ geminiq --no-launch
 - Windows only.
 - Requires PowerShell.
 - No Start Menu shortcuts are installed, so nothing new appears in Windows Search.
+- The launcher clears the current console and starts Codex/Gemini in that same window.
 - The launch flow and UI are provided by `scripts/agent_launcher.ps1`.

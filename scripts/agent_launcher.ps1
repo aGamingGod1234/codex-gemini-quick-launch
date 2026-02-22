@@ -525,8 +525,29 @@ if ($NoLaunch) {
 }
 
 Write-Host ''
-Write-Host 'Launching in a new cmd window...' -ForegroundColor Green
-$spawnCmd = 'start "" /MAX cmd /k ' + $cmdLine
-Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', $spawnCmd -WorkingDirectory $workingDir -WindowStyle Hidden
-exit 0
+Write-Host 'Clearing current window and launching here...' -ForegroundColor Green
+try {
+    Clear-Host
+}
+catch {
+    try { [Console]::Clear() } catch {}
+}
+
+$cliPath = $commandParts[0]
+$cliArgs = @()
+if ($commandParts.Count -gt 1) {
+    $cliArgs = $commandParts[1..($commandParts.Count - 1)]
+}
+
+$exitCode = 1
+Push-Location -LiteralPath $workingDir
+try {
+    & $cliPath @cliArgs
+    $exitCode = if ($null -ne $LASTEXITCODE) { [int]$LASTEXITCODE } else { 0 }
+}
+finally {
+    Pop-Location
+}
+
+exit $exitCode
 
