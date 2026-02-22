@@ -1,58 +1,86 @@
-# Codex + Gemini Quick Launch (Windows)
+# Codex + Gemini + Claude Quick Launch (Windows, macOS, Linux)
 
-This package installs two global commands that reuse your interactive launcher script:
+This package installs global quick-launch wrappers that provide the same interactive flow across platforms:
 
 - `codexq`
 - `geminiq`
+- `claudeq`
+
+Legacy command aliases also work:
+
+- `codex-quick-launch`
+- `gemini-quick-launch`
+- `claude-quick-launch`
 
 ## One-command install
 
-```powershell
-npm install -g @openai/codex @google/gemini-cli https://codeload.github.com/aGamingGod1234/codex-gemini-quick-launch/tar.gz/refs/heads/main
+```bash
+npm install -g @openai/codex @google/gemini-cli @anthropic-ai/claude-code https://codeload.github.com/aGamingGod1234/codex-gemini-quick-launch/tar.gz/refs/heads/main
 ```
 
 ## Usage
 
-```powershell
+```bash
 codexq
 geminiq
+claudeq
 ```
-
-Legacy commands still work:
-
-```powershell
-codex-quick-launch
-gemini-quick-launch
-```
-
-Original upstream CLIs stay on:
-
-```powershell
-codex
-gemini
-```
-
-## Update
-
-```powershell
-npm install -g @openai/codex @google/gemini-cli https://codeload.github.com/aGamingGod1234/codex-gemini-quick-launch/tar.gz/refs/heads/main
-```
-
-Both launcher commands now check GitHub and print:
-- `New version available`
-- the exact `npm install -g ...` command to upgrade
 
 Optional dry-run mode:
 
-```powershell
+```bash
 codexq --no-launch
 geminiq --no-launch
+claudeq --no-launch
 ```
+
+## Claude support
+
+The Claude launcher now supports model aliases documented by Claude Code:
+
+- `default`
+- `sonnet`
+- `opus`
+- `haiku`
+- `sonnet[1m]`
+- `opusplan`
+
+When you pick “Allow all permissions”, the launcher adds:
+
+- `--dangerously-skip-permissions`
+
+
+## Automatic updates on launch
+
+The quick-launch wrappers now perform an update check when you run them.
+
+- If no update is available, launch continues normally.
+- If an update is available, the wrapper automatically runs:
+
+```bash
+npm install -g @openai/codex @google/gemini-cli @anthropic-ai/claude-code https://codeload.github.com/aGamingGod1234/codex-gemini-quick-launch/tar.gz/refs/heads/main
+```
+
+- If auto-update succeeds, the launcher continues with the new install.
+- If auto-update fails (network/permissions), launch still continues with the current install and prints a warning.
+
+## Filesystem differences: Windows vs macOS/Linux
+
+The launchers account for platform filesystem differences:
+
+- **Path separators:** Windows commonly uses `\`; macOS/Linux use `/`.
+- **Case sensitivity:** Windows is usually case-insensitive by default; Linux is case-sensitive; macOS is often case-insensitive by default but can be configured case-sensitive.
+- **Home and app-data locations:**
+  - Windows: `%USERPROFILE%`, `%APPDATA%`, `%LOCALAPPDATA%`
+  - macOS: `$HOME`, plus app data in `~/Library/Application Support`
+  - Linux: `$HOME`, with state/config often under XDG paths such as `~/.local/state`
+- **Drive roots:** Windows has drive letters (`C:\`), while macOS/Linux use a single root (`/`).
 
 ## Notes
 
-- Windows only.
-- Requires PowerShell.
-- No Start Menu shortcuts are installed, so nothing new appears in Windows Search.
-- The launcher clears the current console and starts Codex/Gemini in that same window.
-- The launch flow and UI are provided by `scripts/agent_launcher.ps1`.
+- Windows launch flow remains PowerShell-based (`scripts/agent_launcher.ps1`) to preserve existing behavior.
+- macOS/Linux use a Node-based interactive launcher (`scripts/agent_launcher_unix.js`) with matching prompts and options.
+- Original upstream CLIs stay available directly:
+  - `codex`
+  - `gemini`
+  - `claude`

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+const { spawnSync } = require('child_process');
 const fs = require('fs');
 const https = require('https');
 const os = require('os');
@@ -93,8 +94,17 @@ function compareSemver(a, b) {
 }
 
 function getStateFile(packageName) {
-  const localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
-  return path.join(localAppData, packageName, 'update-check.json');
+  if (process.platform === 'win32') {
+    const localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
+    return path.join(localAppData, packageName, 'update-check.json');
+  }
+
+  if (process.platform === 'darwin') {
+    return path.join(os.homedir(), 'Library', 'Application Support', packageName, 'update-check.json');
+  }
+
+  const xdgStateHome = process.env.XDG_STATE_HOME || path.join(os.homedir(), '.local', 'state');
+  return path.join(xdgStateHome, packageName, 'update-check.json');
 }
 
 async function fetchRemoteRepoState(repoSlug, branch = 'main') {
@@ -172,6 +182,62 @@ async function printUpdateNotice(config) {
   }
 }
 
+function runAutoUpdate(config) {
+  const command = String(config.updateCommand || '').trim();
+  if (!command) {
+    return { ok: false, skipped: true, reason: 'missing update command' };
+  }
+
+  const result = spawnSync(command, {
+    stdio: 'inherit',
+    shell: true,
+    env: {
+      ...process.env,
+      npm_config_audit: 'false',
+      npm_config_fund: 'false',
+    },
+  });
+
+  if (result.error) {
+    return { ok: false, skipped: false, reason: result.error.message };
+  }
+
+  if ((result.status ?? 1) !== 0) {
+    return { ok: false, skipped: false, reason: `exit code ${result.status}` };
+  }
+
+  return { ok: true, skipped: false, reason: '' };
+}
+
+async function autoUpdateIfNeeded(config) {
+  const notice = await checkForUpdate(config);
+  if (!notice) {
+    return { updated: false, attempted: false };
+  }
+
+  console.log(notice);
+  console.log('[update] Auto-update enabled. Installing latest version now...');
+
+  const result = runAutoUpdate(config);
+  if (!result.ok) {
+    console.warn(`[update] Auto-update failed (${result.reason}). Continuing with the currently installed version.`);
+    return { updated: false, attempted: true };
+  }
+
+  console.log('[update] Auto-update completed successfully.');
+  await recordInstallMeta(config);
+
+  const stateFile = getStateFile(config.packageName);
+  const state = safeReadJson(stateFile) || {};
+  safeWriteJson(stateFile, {
+    ...state,
+    notice: '',
+    lastAutoUpdateAt: new Date().toISOString(),
+  });
+
+  return { updated: true, attempted: true };
+}
+
 async function recordInstallMeta(config) {
   const installMetaPath = path.join(config.packageRoot, INSTALL_META_FILE);
   const meta = {
@@ -195,7 +261,7 @@ async function recordInstallMeta(config) {
 }
 
 module.exports = {
+  autoUpdateIfNeeded,
   printUpdateNotice,
   recordInstallMeta,
 };
-
