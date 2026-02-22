@@ -46,6 +46,7 @@ function restoreOriginalCliAliases(packageRoot) {
   const mappings = [
     { aliasName: 'codex', backupName: 'codex-cli', quickScriptName: 'codex-quick-launch.js' },
     { aliasName: 'gemini', backupName: 'gemini-cli', quickScriptName: 'gemini-quick-launch.js' },
+    { aliasName: 'claude', backupName: 'claude-cli', quickScriptName: 'claude-quick-launch.js' },
   ];
   const exts = ['', '.cmd', '.ps1'];
   const restored = [];
@@ -86,7 +87,7 @@ function removeLegacyStartMenuEntries() {
     'Start Menu',
     'Programs',
   );
-  const legacyFiles = ['codex.bat', 'gemini.bat', 'codex.lnk', 'gemini.lnk'];
+  const legacyFiles = ['codex.bat', 'gemini.bat', 'claude.bat', 'codex.lnk', 'gemini.lnk', 'claude.lnk'];
   const removed = [];
   for (const fileName of legacyFiles) {
     const filePath = path.join(startMenuPrograms, fileName);

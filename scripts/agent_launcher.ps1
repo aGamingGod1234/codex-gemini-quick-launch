@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('codex', 'gemini')]
+    [ValidateSet('codex', 'gemini', 'claude')]
     [string]$Provider,
     [Alias('m')]
     [string]$Model,
@@ -357,7 +357,7 @@ function Resolve-WorkingDirectory {
 }
 
 function Resolve-CliPath {
-    param([ValidateSet('codex', 'gemini')][string]$Cli)
+    param([ValidateSet('codex', 'gemini', 'claude')][string]$Cli)
 
     $cmdName = '{0}.cmd' -f $Cli
     $cmd = Get-Command $cmdName -ErrorAction SilentlyContinue
@@ -389,7 +389,7 @@ function Join-CommandParts {
 
 function Resolve-ModelSelection {
     param(
-        [ValidateSet('codex', 'gemini')][string]$Provider,
+        [ValidateSet('codex', 'gemini', 'claude')][string]$Provider,
         [string]$InputModel,
         [hashtable[]]$Choices,
         [string]$MenuTitle
@@ -412,7 +412,7 @@ function Resolve-ModelSelection {
 
 function Build-LaunchParts {
     param(
-        [ValidateSet('codex', 'gemini')][string]$Provider,
+        [ValidateSet('codex', 'gemini', 'claude')][string]$Provider,
         [string]$Model,
         [string]$Reasoning,
         [ValidateSet('allow_all', 'none')][string]$PermissionMode
@@ -422,23 +422,33 @@ function Build-LaunchParts {
     $cliPath = Resolve-CliPath -Cli $Provider
     $parts.Add($cliPath)
 
-    $parts.Add('-m')
-    $parts.Add($Model)
-
-    if ($Provider -eq 'codex') {
-        $parts.Add('-c')
-        $parts.Add('reasoning_effort=' + $Reasoning)
+    if ($Provider -eq 'claude') {
+        $parts.Add('--model')
+        $parts.Add($Model)
 
         if ($PermissionMode -eq 'allow_all') {
-            $parts.Add('--dangerously-bypass-approvals-and-sandbox')
+            $parts.Add('--dangerously-skip-permissions')
         }
     }
     else {
-        if ($PermissionMode -eq 'allow_all') {
-            $parts.Add('-s')
-            $parts.Add('false')
-            $parts.Add('--approval-mode')
-            $parts.Add('yolo')
+        $parts.Add('-m')
+        $parts.Add($Model)
+
+        if ($Provider -eq 'codex') {
+            $parts.Add('-c')
+            $parts.Add('reasoning_effort=' + $Reasoning)
+
+            if ($PermissionMode -eq 'allow_all') {
+                $parts.Add('--dangerously-bypass-approvals-and-sandbox')
+            }
+        }
+        else {
+            if ($PermissionMode -eq 'allow_all') {
+                $parts.Add('-s')
+                $parts.Add('false')
+                $parts.Add('--approval-mode')
+                $parts.Add('yolo')
+            }
         }
     }
 
@@ -476,7 +486,7 @@ if ($Provider -eq 'codex') {
     $reasoningIndex = Show-NumberedMenu -Title 'Select reasoning level' -Options ($reasoningOptions | ForEach-Object { $_.Label })
     $reasoningEffort = $reasoningOptions[$reasoningIndex].Value
 }
-else {
+elseif ($Provider -eq 'gemini') {
     $geminiModels = @(
         @{ Label = 'gemini-3-pro-preview'; Value = 'gemini-3-pro-preview' },
         @{ Label = 'gemini-3-flash-preview'; Value = 'gemini-3-flash-preview' },
@@ -487,10 +497,28 @@ else {
     $modelSelection = Resolve-ModelSelection -Provider $Provider -InputModel $Model -Choices $geminiModels -MenuTitle 'Select Gemini model'
 }
 
+else {
+    $claudeModels = @(
+        @{ Label = 'default'; Value = 'default' },
+        @{ Label = 'sonnet'; Value = 'sonnet' },
+        @{ Label = 'opus'; Value = 'opus' },
+        @{ Label = 'haiku'; Value = 'haiku' },
+        @{ Label = 'sonnet[1m]'; Value = 'sonnet[1m]' },
+        @{ Label = 'opusplan'; Value = 'opusplan' }
+    )
+    $modelSelection = Resolve-ModelSelection -Provider $Provider -InputModel $Model -Choices $claudeModels -MenuTitle 'Select Claude model'
+}
+
 $sandboxOptions = $null
 if ($Provider -eq 'gemini') {
     $sandboxOptions = @(
         'Allow all permissions (no Docker sandbox)',
+        'No modifications besides model and directory'
+    )
+}
+elseif ($Provider -eq 'claude') {
+    $sandboxOptions = @(
+        'Allow all permissions (--dangerously-skip-permissions)',
         'No modifications besides model and directory'
     )
 }
@@ -515,8 +543,11 @@ if ($Provider -eq 'codex') {
     Write-Host ('Reasoning: {0}' -f $reasoningEffort)
     Write-Host ('Mode     : {0}' -f ($(if ($permissionMode -eq 'allow_all') { 'Allow all permissions (bypass approvals and sandbox)' } else { 'No modifications besides model and directory' })))
 }
-else {
+elseif ($Provider -eq 'gemini') {
     Write-Host ('Mode     : {0}' -f ($(if ($permissionMode -eq 'allow_all') { 'Allow all permissions (no Docker sandbox)' } else { 'No modifications besides model and directory' })))
+}
+else {
+    Write-Host ('Mode     : {0}' -f ($(if ($permissionMode -eq 'allow_all') { 'Allow all permissions (--dangerously-skip-permissions)' } else { 'No modifications besides model and directory' })))
 }
 
 if ($NoLaunch) {
