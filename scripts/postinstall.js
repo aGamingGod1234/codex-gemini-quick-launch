@@ -27,6 +27,71 @@ function readFileText(filePath) {
   }
 }
 
+function readJson(filePath) {
+  try {
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  } catch (_error) {
+    return null;
+  }
+}
+
+function writeJson(filePath, value) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+}
+
+function normalizeCommand(commandPath) {
+  return path.resolve(commandPath).replace(/\\/g, '/').toLowerCase();
+}
+
+function ensureHookEntry(settings, hookKey, commandPath) {
+  if (!settings[hookKey] || typeof settings[hookKey] !== 'object' || Array.isArray(settings[hookKey])) {
+    settings[hookKey] = {};
+  }
+  if (!Array.isArray(settings[hookKey].hooks)) {
+    settings[hookKey].hooks = [];
+  }
+
+  const normalizedCommandPath = normalizeCommand(commandPath);
+  const hookName = 'cgl-auto-refine';
+  const existingIndex = settings[hookKey].hooks.findIndex((hook) => {
+    if (!hook || typeof hook !== 'object') {
+      return false;
+    }
+    if (hook.name === hookName) {
+      return true;
+    }
+    if (typeof hook.command === 'string' && normalizeCommand(hook.command) === normalizedCommandPath) {
+      return true;
+    }
+    return false;
+  });
+
+  const nextEntry = {
+    name: hookName,
+    command: commandPath,
+  };
+
+  if (existingIndex >= 0) {
+    settings[hookKey].hooks[existingIndex] = {
+      ...settings[hookKey].hooks[existingIndex],
+      ...nextEntry,
+    };
+  } else {
+    settings[hookKey].hooks.push(nextEntry);
+  }
+}
+
+function ensureHookSettings(settingsPath, hookKey, commandPath) {
+  const settings = readJson(settingsPath) || {};
+  if (!settings.hooks || typeof settings.hooks !== 'object' || Array.isArray(settings.hooks)) {
+    settings.hooks = {};
+  }
+
+  ensureHookEntry(settings.hooks, hookKey, commandPath);
+  writeJson(settingsPath, settings);
+}
+
 function pointsToQuickLaunch(filePath, quickScriptName) {
   if (!fs.existsSync(filePath)) {
     return false;
@@ -99,6 +164,88 @@ function removeLegacyStartMenuEntries() {
   return removed;
 }
 
+function installClaudeRefineHook(packageRoot) {
+  if (process.env.CGL_DISABLE_REFINE === '1') {
+    return;
+  }
+
+  const homeDir = os.homedir();
+  const scriptSource = path.join(packageRoot, 'scripts', 'refine', 'claude-hook.js');
+  const commonSource = path.join(packageRoot, 'scripts', 'refine', 'common.js');
+  const hookDir = path.join(homeDir, '.claude', 'hooks');
+  const hookScriptPath = path.join(hookDir, 'cgl-refine.js');
+  const hookCommonPath = path.join(hookDir, 'common.js');
+
+  fs.mkdirSync(hookDir, { recursive: true });
+  fs.copyFileSync(scriptSource, hookScriptPath);
+  fs.copyFileSync(commonSource, hookCommonPath);
+  try {
+    fs.chmodSync(hookScriptPath, 0o755);
+    fs.chmodSync(hookCommonPath, 0o644);
+  } catch (_error) {
+    // Ignore chmod failures on unsupported filesystems.
+  }
+
+  const settingsPath = path.join(homeDir, '.claude', 'settings.json');
+  ensureHookSettings(settingsPath, 'UserPromptSubmit', hookScriptPath);
+}
+
+function installGeminiRefineHook(packageRoot) {
+  if (process.env.CGL_DISABLE_REFINE === '1') {
+    return;
+  }
+
+  const homeDir = os.homedir();
+  const scriptSource = path.join(packageRoot, 'scripts', 'refine', 'gemini-hook.js');
+  const commonSource = path.join(packageRoot, 'scripts', 'refine', 'common.js');
+  const hookDir = path.join(homeDir, '.gemini', 'hooks');
+  const hookScriptPath = path.join(hookDir, 'cgl-refine.js');
+  const hookCommonPath = path.join(hookDir, 'common.js');
+
+  fs.mkdirSync(hookDir, { recursive: true });
+  fs.copyFileSync(scriptSource, hookScriptPath);
+  fs.copyFileSync(commonSource, hookCommonPath);
+  try {
+    fs.chmodSync(hookScriptPath, 0o755);
+    fs.chmodSync(hookCommonPath, 0o644);
+  } catch (_error) {
+    // Ignore chmod failures on unsupported filesystems.
+  }
+
+  const settingsPath = path.join(homeDir, '.gemini', 'settings.json');
+  ensureHookSettings(settingsPath, 'BeforeAgent', hookScriptPath);
+}
+
+function installCodexAgentsHomeSnippet(packageRoot) {
+  if (process.env.CGL_DISABLE_REFINE === '1') {
+    return;
+  }
+
+  const snippetPath = path.join(packageRoot, 'scripts', 'refine', 'agents-snippet.md');
+  const snippet = fs.readFileSync(snippetPath, 'utf8').trim();
+  const homeAgentsPath = path.join(os.homedir(), 'AGENTS.md');
+  const existing = readFileText(homeAgentsPath);
+
+  const startMarker = '<!-- CGL_AUTO_REFINE_START -->';
+  const endMarker = '<!-- CGL_AUTO_REFINE_END -->';
+  const blockPattern = new RegExp(`${startMarker}[\\s\\S]*?${endMarker}`, 'm');
+
+  let nextContent;
+  if (!existing.trim()) {
+    nextContent = `${snippet}\n`;
+  } else if (blockPattern.test(existing)) {
+    nextContent = existing.replace(blockPattern, snippet);
+    if (!nextContent.endsWith('\n')) {
+      nextContent += '\n';
+    }
+  } else {
+    const spacer = existing.endsWith('\n') ? '\n' : '\n\n';
+    nextContent = `${existing}${spacer}${snippet}\n`;
+  }
+
+  fs.writeFileSync(homeAgentsPath, nextContent, 'utf8');
+}
+
 (async () => {
   try {
     const packageRoot = path.resolve(__dirname, '..');
@@ -111,6 +258,10 @@ function removeLegacyStartMenuEntries() {
     });
     const { restored, warnings } = restoreOriginalCliAliases(packageRoot);
     const removedStartMenuFiles = removeLegacyStartMenuEntries();
+
+    installClaudeRefineHook(packageRoot);
+    installGeminiRefineHook(packageRoot);
+    installCodexAgentsHomeSnippet(packageRoot);
 
     if (restored.length > 0) {
       console.log(`Restored original CLI shims: ${restored.join(', ')}`);

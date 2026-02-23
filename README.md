@@ -96,6 +96,31 @@ When you run any launcher (`codexq`, `geminiq`, `claudeq`), it follows this high
 - “Allow all permissions” mode adds:
   - `--dangerously-skip-permissions`
 
+
+## Auto Prompt Refinement (global install behavior)
+
+On postinstall, this package configures native prompt hooks for the upstream CLIs so refinement happens even when users run plain `codex`, `claude`, or `gemini` directly (not only `codexq`/`claudeq`/`geminiq`).
+
+Installed artifacts:
+- `~/.claude/hooks/cgl-refine.js` (+ `~/.claude/hooks/common.js`)
+- `~/.gemini/hooks/cgl-refine.js` (+ `~/.gemini/hooks/common.js`)
+- `~/.claude/settings.json` merge: adds/updates `hooks.UserPromptSubmit.hooks[]` entry named `cgl-auto-refine`
+- `~/.gemini/settings.json` merge: adds/updates `hooks.BeforeAgent.hooks[]` entry named `cgl-auto-refine`
+- `~/AGENTS.md` merge: adds/updates a marked Codex instructions block (`CGL_AUTO_REFINE_START`/`CGL_AUTO_REFINE_END`)
+
+Behavior:
+- The hook/snippet instructs agents to always output a short **Refined Prompt**/**Refined Spec** section first, then continue implementation in the same response.
+- Settings merges are non-destructive: existing keys and other hooks are preserved.
+
+Opt-out:
+- Set `CGL_DISABLE_REFINE=1` and rerun postinstall (`npm install -g ...`) to skip install/update of refinement config.
+- If you previously installed refinement hooks/snippets, remove the `cgl-auto-refine` hook entries from `~/.claude/settings.json` and `~/.gemini/settings.json`, and remove the marked block from `~/AGENTS.md`.
+
+Manual verification:
+1. Launch `claude`, submit any prompt, confirm the first section is **Refined Prompt** (or **Refined Spec**) before coding output.
+2. Launch `gemini`, submit any prompt, confirm the first section is **Refined Prompt** (or **Refined Spec**) before coding output.
+3. Launch `codex` in a directory under your home folder, submit any prompt, confirm the first section is **Refined Prompt** (or **Refined Spec**) before coding output.
+
 ## Automatic updates
 
 The launcher performs periodic update checks. If a newer version is detected, it attempts to run:
