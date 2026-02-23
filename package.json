@@ -1,7 +1,7 @@
 {
   "name": "codex-gemini-quick-launch",
-  "version": "1.1.1",
-  "description": "Windows command-only quick launchers for Codex and Gemini CLIs.",
+  "version": "1.2.0",
+  "description": "Cross-platform quick launchers for Codex, Gemini, and Claude CLIs.",
   "license": "MIT",
   "scripts": {
     "postinstall": "node scripts/postinstall.js"
@@ -9,8 +9,10 @@
   "bin": {
     "codexq": "bin/codex-quick-launch.js",
     "geminiq": "bin/gemini-quick-launch.js",
+    "claudeq": "bin/claude-quick-launch.js",
     "codex-quick-launch": "bin/codex-quick-launch.js",
-    "gemini-quick-launch": "bin/gemini-quick-launch.js"
+    "gemini-quick-launch": "bin/gemini-quick-launch.js",
+    "claude-quick-launch": "bin/claude-quick-launch.js"
   },
   "files": [
     "bin",
@@ -23,8 +25,11 @@
   "keywords": [
     "codex",
     "gemini",
+    "claude",
     "launcher",
     "quick-launch",
-    "windows"
+    "windows",
+    "linux",
+    "macos"
   ]
 }
