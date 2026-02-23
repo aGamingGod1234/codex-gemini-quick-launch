@@ -1,24 +1,41 @@
-# Codex + Gemini + Claude Quick Launch (Windows, macOS, Linux)
+# Codex + Gemini + Claude Quick Launch
 
-This package installs global quick-launch wrappers that provide the same interactive flow across platforms:
+Cross-platform interactive launchers for **Codex**, **Gemini**, and **Claude Code**.
 
+This package provides lightweight wrapper commands that help you:
+- choose a working directory,
+- pick a model,
+- choose a permission/sandbox mode,
+- and launch your selected CLI with consistent prompts.
+
+It supports:
+- **Windows** (PowerShell-based launcher flow)
+- **macOS** and **Linux** (Node-based launcher flow)
+
+## Commands installed
+
+Primary short commands:
 - `codexq`
 - `geminiq`
 - `claudeq`
 
-Legacy command aliases also work:
-
+Legacy aliases:
 - `codex-quick-launch`
 - `gemini-quick-launch`
 - `claude-quick-launch`
 
-## One-command install
+Your original upstream CLIs remain available directly:
+- `codex`
+- `gemini`
+- `claude`
+
+## Install
 
 ```bash
 npm install -g @openai/codex @google/gemini-cli @anthropic-ai/claude-code https://codeload.github.com/aGamingGod1234/codex-gemini-quick-launch/tar.gz/refs/heads/main
 ```
 
-## Usage
+## Basic usage
 
 ```bash
 codexq
@@ -26,7 +43,7 @@ geminiq
 claudeq
 ```
 
-Optional dry-run mode:
+Optional dry-run (show command without launching):
 
 ```bash
 codexq --no-launch
@@ -34,53 +51,90 @@ geminiq --no-launch
 claudeq --no-launch
 ```
 
-## Claude support
+## Overall launch flow
 
-The Claude launcher now supports model aliases documented by Claude Code:
+When you run any launcher (`codexq`, `geminiq`, `claudeq`), it follows this high-level flow:
 
-- `default`
-- `sonnet`
-- `opus`
-- `haiku`
-- `sonnet[1m]`
-- `opusplan`
+1. **Check for updates** for this quick-launch package.
+2. If an update is available, it attempts to **auto-update** by running the configured global npm install command.
+3. Continue to launcher UI (even if update fails).
+4. Ask for target directory.
+5. Ask for model (unless passed by arg where supported).
+6. Ask for permission/sandbox mode.
+7. Show summary.
+8. Launch selected CLI (or print command if `--no-launch`).
 
-When you pick “Allow all permissions”, the launcher adds:
+## Platform behavior
 
-- `--dangerously-skip-permissions`
+### Windows
+- Uses `scripts/agent_launcher.ps1`.
+- Keeps the existing PowerShell interactive behavior.
+- Supports providers: `codex`, `gemini`, `claude`.
 
+### macOS/Linux
+- Uses `scripts/agent_launcher_unix.js`.
+- Provides matching interactive flow in Node.js.
+- Supports providers: `codex`, `gemini`, `claude`.
 
-## Automatic updates on launch
+## Provider behavior
 
-The quick-launch wrappers now perform an update check when you run them.
+### Codex
+- Model flag: `-m <model>`
+- Adds reasoning config: `-c reasoning_effort=<level>` (Windows flow uses interactive reasoning selection)
+- “Allow all permissions” mode adds:
+  - `--dangerously-bypass-approvals-and-sandbox`
 
-- If no update is available, launch continues normally.
-- If an update is available, the wrapper automatically runs:
+### Gemini
+- Model flag: `-m <model>`
+- “Allow all permissions” mode adds:
+  - `-s false --approval-mode yolo`
+
+### Claude
+- Model flag: `--model <alias-or-model>`
+- Supported aliases in launcher:
+  - `default`, `sonnet`, `opus`, `haiku`, `sonnet[1m]`, `opusplan`
+- “Allow all permissions” mode adds:
+  - `--dangerously-skip-permissions`
+
+## Automatic updates
+
+The launcher performs periodic update checks. If a newer version is detected, it attempts to run:
 
 ```bash
 npm install -g @openai/codex @google/gemini-cli @anthropic-ai/claude-code https://codeload.github.com/aGamingGod1234/codex-gemini-quick-launch/tar.gz/refs/heads/main
 ```
 
-- If auto-update succeeds, the launcher continues with the new install.
-- If auto-update fails (network/permissions), launch still continues with the current install and prints a warning.
+Behavior:
+- If update succeeds, launcher proceeds using updated installation.
+- If update fails (network, permissions, npm issues), it prints a warning and continues with current installed version.
 
-## Filesystem differences: Windows vs macOS/Linux
+## Filesystem differences handled
 
-The launchers account for platform filesystem differences:
-
-- **Path separators:** Windows commonly uses `\`; macOS/Linux use `/`.
-- **Case sensitivity:** Windows is usually case-insensitive by default; Linux is case-sensitive; macOS is often case-insensitive by default but can be configured case-sensitive.
-- **Home and app-data locations:**
+The project accounts for core platform filesystem differences:
+- **Separators**: Windows commonly `\`, macOS/Linux `/`
+- **Case sensitivity**:
+  - Windows: typically case-insensitive
+  - Linux: case-sensitive
+  - macOS: commonly case-insensitive by default (can vary)
+- **User/app data locations**:
   - Windows: `%USERPROFILE%`, `%APPDATA%`, `%LOCALAPPDATA%`
-  - macOS: `$HOME`, plus app data in `~/Library/Application Support`
-  - Linux: `$HOME`, with state/config often under XDG paths such as `~/.local/state`
-- **Drive roots:** Windows has drive letters (`C:\`), while macOS/Linux use a single root (`/`).
+  - macOS: `$HOME`, `~/Library/Application Support`
+  - Linux: `$HOME`, often XDG dirs such as `~/.local/state`
+- **Path roots**:
+  - Windows: drive letters (`C:\`)
+  - macOS/Linux: single root (`/`)
+
+## Repository structure (important files)
+
+- `bin/codex-quick-launch.js` – codex command wrapper
+- `bin/gemini-quick-launch.js` – gemini command wrapper
+- `bin/claude-quick-launch.js` – claude command wrapper
+- `scripts/agent_launcher.ps1` – Windows interactive launcher
+- `scripts/agent_launcher_unix.js` – macOS/Linux interactive launcher
+- `scripts/update-check.js` – update detection + auto-update logic
+- `scripts/postinstall.js` – install metadata + Windows legacy shim cleanup
 
 ## Notes
 
-- Windows launch flow remains PowerShell-based (`scripts/agent_launcher.ps1`) to preserve existing behavior.
-- macOS/Linux use a Node-based interactive launcher (`scripts/agent_launcher_unix.js`) with matching prompts and options.
-- Original upstream CLIs stay available directly:
-  - `codex`
-  - `gemini`
-  - `claude`
+- Requires Node.js **18+**.
+- Quick launchers do not replace upstream CLIs; they orchestrate launch configuration and then call those CLIs.
