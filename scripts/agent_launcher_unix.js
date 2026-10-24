@@ -5,22 +5,7 @@ const path = require('path');
 const readline = require('readline');
 const { spawn } = require('child_process');
 
-function parseArgs(argv) {
-  const result = { provider: null, model: null, noLaunch: false };
-  for (let i = 0; i < argv.length; i += 1) {
-    const token = argv[i];
-    if (token === '--provider') {
-      result.provider = argv[i + 1];
-      i += 1;
-    } else if (token === '--model' || token === '-m') {
-      result.model = argv[i + 1];
-      i += 1;
-    } else if (token === '--no-launch' || token === '-NoLaunch') {
-      result.noLaunch = true;
-    }
-  }
-  return result;
-}
+const { parseArgs } = require('./launcher-args');
 
 function getSearchRoots() {
   const home = os.homedir();
@@ -48,7 +33,12 @@ function findDirMatches(needle, limit = 5) {
         if (d > 6) {
           continue;
         }
-        const entries = fs.readdirSync(p, { withFileTypes: true });
+        let entries;
+        try {
+          entries = fs.readdirSync(p, { withFileTypes: true });
+        } catch (_error) {
+          continue;
+        }
         for (const entry of entries) {
           if (!entry.isDirectory()) {
             continue;
@@ -98,22 +88,22 @@ function quoteArg(arg) {
 function buildCommand(provider, model, permissionMode) {
   const parts = [provider];
   if (provider === 'claude') {
-    parts.push('--model', model);
+    if (model !== 'configured') parts.push('--model', model);
     if (permissionMode === 'allow_all') {
       parts.push('--dangerously-skip-permissions');
     }
     return parts;
   }
 
-  parts.push('-m', model);
+  if (model !== 'configured') parts.push('-m', model);
   if (provider === 'codex') {
-    parts.push('-c', 'reasoning_effort=high');
+    parts.push('-c', 'model_reasoning_effort=high');
     if (permissionMode === 'allow_all') {
       parts.push('--dangerously-bypass-approvals-and-sandbox');
     }
   }
   if (provider === 'gemini' && permissionMode === 'allow_all') {
-    parts.push('-s', 'false', '--approval-mode', 'yolo');
+    parts.push('--sandbox=false', '--approval-mode', 'yolo');
   }
   return parts;
 }
@@ -127,24 +117,37 @@ async function run() {
   }
 
   const models = {
-    codex: ['gpt-5.3-codex', 'gpt-5.2-codex', 'gpt-5.2', 'gpt-5.1-max', 'gpt-5.1-mini'],
-    gemini: ['gemini-3-pro-preview', 'gemini-3-flash-preview', 'gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'],
-    claude: ['default', 'sonnet', 'opus', 'haiku', 'sonnet[1m]', 'opusplan'],
+    codex: ['configured', 'custom'],
+    gemini: ['configured', 'auto', 'pro', 'flash', 'flash-lite', 'custom'],
+    claude: ['configured', 'default', 'sonnet', 'opus', 'haiku', 'sonnet[1m]', 'opusplan', 'custom'],
   };
 
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  const ask = (prompt) => new Promise((resolve) => rl.question(prompt, resolve));
+  const lines = rl[Symbol.asyncIterator]();
+  const ask = async (prompt) => {
+    process.stdout.write(prompt);
+    const { value, done } = await lines.next();
+    if (done) throw new Error('Input closed before configuration was complete.');
+    return value.trim();
+  };
+  const select = async (count) => {
+    while (true) {
+      const value = Number(await ask(`Select 1-${count}: `));
+      if (Number.isInteger(value) && value >= 1 && value <= count) return value;
+      console.log('Invalid selection. Try again.');
+    }
+  };
 
   let workingDir = await ask('Enter full folder path or folder name (Enter for current directory): ');
   if (!workingDir.trim()) {
     workingDir = process.cwd();
-  } else if (!path.isAbsolute(workingDir) || !fs.existsSync(workingDir)) {
+  } else if (!fs.existsSync(workingDir)) {
     const matches = findDirMatches(workingDir.trim());
     if (matches.length > 0) {
       console.log('\nTop matches:');
       matches.forEach((match, idx) => console.log(` ${idx + 1}. ${match.path}`));
       console.log(` ${matches.length + 1}. Enter full path manually`);
-      const selected = Number(await ask(`Select 1-${matches.length + 1}: `));
+      const selected = await select(matches.length + 1);
       if (selected >= 1 && selected <= matches.length) {
         workingDir = matches[selected - 1].path;
       } else {
@@ -159,18 +162,25 @@ async function run() {
     process.exit(1);
   }
 
+  workingDir = path.resolve(workingDir);
+
   let selectedModel = options.model;
   if (!selectedModel) {
     console.log('\nSelect model:');
-    models[provider].forEach((model, idx) => console.log(` ${idx + 1}. ${model}`));
-    const idx = Number(await ask(`Select 1-${models[provider].length}: `));
-    selectedModel = models[provider][idx - 1] || models[provider][0];
+    models[provider].forEach((model, idx) => console.log(` ${idx + 1}. ${model === 'configured' ? 'Use CLI configured/default model' : model === 'custom' ? 'Enter model ID or alias' : model}`));
+    const idx = await select(models[provider].length);
+    selectedModel = models[provider][idx - 1];
+    if (selectedModel === 'custom') {
+      do {
+        selectedModel = await ask('Enter model ID or alias: ');
+      } while (!selectedModel || selectedModel.startsWith('-'));
+    }
   }
 
   console.log('\nSandbox option:');
   console.log(' 1. Allow all permissions');
   console.log(' 2. No modifications besides model and directory');
-  const sandboxChoice = Number(await ask('Select 1-2: '));
+  const sandboxChoice = await select(2);
   const permissionMode = sandboxChoice === 1 ? 'allow_all' : 'none';
 
   const commandParts = buildCommand(provider, selectedModel, permissionMode);
@@ -193,7 +203,7 @@ async function run() {
     console.error(`Failed to launch ${provider}: ${error.message}`);
     process.exit(1);
   });
-  child.on('exit', (code) => process.exit(code ?? 0));
+  child.on('exit', (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
 }
 
 run().catch((error) => {

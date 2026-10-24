@@ -60,6 +60,13 @@ function Prepare-InputPrompt {
 function Read-InputLine {
     param([Parameter(Mandatory = $true)][string]$Prompt)
 
+    if ([Console]::IsInputRedirected) {
+        Write-Host -NoNewline ($Prompt + ': ')
+        $line = [Console]::ReadLine()
+        if ($null -eq $line) { throw 'Input closed before configuration was complete.' }
+        return $line
+    }
+
     Prepare-InputPrompt
     Write-Host -NoNewline ($Prompt + ': ')
     $buffer = New-Object System.Text.StringBuilder
@@ -359,18 +366,19 @@ function Resolve-WorkingDirectory {
 function Resolve-CliPath {
     param([ValidateSet('codex', 'gemini', 'claude')][string]$Cli)
 
-    $cmdName = '{0}.cmd' -f $Cli
-    $cmd = Get-Command $cmdName -ErrorAction SilentlyContinue
+    $cmd = Get-Command $Cli -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($cmd -and $cmd.Source) {
         return $cmd.Source
     }
 
-    $fallback = Join-Path $env:APPDATA ('npm\{0}' -f $cmdName)
-    if (Test-Path -LiteralPath $fallback -PathType Leaf) {
-        return $fallback
+    if ($env:APPDATA) {
+        $fallback = Join-Path $env:APPDATA ('npm\{0}.cmd' -f $Cli)
+        if (Test-Path -LiteralPath $fallback -PathType Leaf) {
+            return $fallback
+        }
     }
 
-    throw ('Could not find {0}. Install it first or ensure it is in PATH.' -f $cmdName)
+    throw ('Could not find {0}. Install it first or ensure it is in PATH.' -f $Cli)
 }
 
 function Quote-CmdArg {
@@ -395,19 +403,18 @@ function Resolve-ModelSelection {
         [string]$MenuTitle
     )
 
-    if ([string]::IsNullOrWhiteSpace($InputModel)) {
-        $modelIndex = Show-NumberedMenu -Title $MenuTitle -Options ($Choices | ForEach-Object { $_.Label })
-        return $Choices[$modelIndex].Value
+    if (-not [string]::IsNullOrWhiteSpace($InputModel)) {
+        return $InputModel.Trim()
     }
 
-    $trimmed = $InputModel.Trim()
-    $match = $Choices | Where-Object { $_.Value -ieq $trimmed } | Select-Object -First 1
-    if ($match) {
-        return $match.Value
+    $modelIndex = Show-NumberedMenu -Title $MenuTitle -Options ($Choices | ForEach-Object { $_.Label })
+    $selected = $Choices[$modelIndex].Value
+    if ($selected -eq 'custom') {
+        do {
+            $selected = (Read-InputLine -Prompt 'Enter model ID or alias').Trim()
+        } while ([string]::IsNullOrWhiteSpace($selected) -or $selected.StartsWith('-'))
     }
-
-    $supported = ($Choices | ForEach-Object { $_.Value }) -join ', '
-    throw ('Unsupported model "{0}" for provider "{1}". Supported values: {2}' -f $trimmed, $Provider, $supported)
+    return $selected
 }
 
 function Build-LaunchParts {
@@ -419,24 +426,28 @@ function Build-LaunchParts {
     )
 
     $parts = New-Object System.Collections.Generic.List[string]
-    $cliPath = Resolve-CliPath -Cli $Provider
+    $cliPath = if ($NoLaunch) { $Provider } else { Resolve-CliPath -Cli $Provider }
     $parts.Add($cliPath)
 
     if ($Provider -eq 'claude') {
-        $parts.Add('--model')
-        $parts.Add($Model)
+        if ($Model -ne 'configured') {
+            $parts.Add('--model')
+            $parts.Add($Model)
+        }
 
         if ($PermissionMode -eq 'allow_all') {
             $parts.Add('--dangerously-skip-permissions')
         }
     }
     else {
-        $parts.Add('-m')
-        $parts.Add($Model)
+        if ($Model -ne 'configured') {
+            $parts.Add('-m')
+            $parts.Add($Model)
+        }
 
         if ($Provider -eq 'codex') {
             $parts.Add('-c')
-            $parts.Add('reasoning_effort=' + $Reasoning)
+            $parts.Add('model_reasoning_effort=' + $Reasoning)
 
             if ($PermissionMode -eq 'allow_all') {
                 $parts.Add('--dangerously-bypass-approvals-and-sandbox')
@@ -444,8 +455,7 @@ function Build-LaunchParts {
         }
         else {
             if ($PermissionMode -eq 'allow_all') {
-                $parts.Add('-s')
-                $parts.Add('false')
+                $parts.Add('--sandbox=false')
                 $parts.Add('--approval-mode')
                 $parts.Add('yolo')
             }
@@ -456,9 +466,11 @@ function Build-LaunchParts {
 }
 
 $providerTitle = $Provider.ToUpperInvariant()
-$host.UI.RawUI.WindowTitle = '{0} Quick Launcher' -f $providerTitle
-Ensure-WindowMaximized
-Ensure-WindowForeground
+if (-not [Console]::IsInputRedirected) {
+    $host.UI.RawUI.WindowTitle = '{0} Quick Launcher' -f $providerTitle
+    Ensure-WindowMaximized
+    Ensure-WindowForeground
+}
 Write-Section -Title ('{0} Quick Launcher' -f $providerTitle)
 Write-Host 'Tip: Press Esc twice quickly at any prompt to close configuration.' -ForegroundColor DarkYellow
 
@@ -469,11 +481,8 @@ $reasoningEffort = $null
 
 if ($Provider -eq 'codex') {
     $codexModels = @(
-        @{ Label = 'gpt 5.3 codex (gpt-5.3-codex)'; Value = 'gpt-5.3-codex' },
-        @{ Label = 'gpt 5.2 codex (gpt-5.2-codex)'; Value = 'gpt-5.2-codex' },
-        @{ Label = 'gpt 5.2 (gpt-5.2)'; Value = 'gpt-5.2' },
-        @{ Label = 'gpt 5.1-max (gpt-5.1-max)'; Value = 'gpt-5.1-max' },
-        @{ Label = 'gpt 5.1-mini (gpt-5.1-mini)'; Value = 'gpt-5.1-mini' }
+        @{ Label = 'Use CLI configured/default model'; Value = 'configured' },
+        @{ Label = 'Enter model ID or alias'; Value = 'custom' }
     )
     $modelSelection = Resolve-ModelSelection -Provider $Provider -InputModel $Model -Choices $codexModels -MenuTitle 'Select Codex model'
 
@@ -488,23 +497,26 @@ if ($Provider -eq 'codex') {
 }
 elseif ($Provider -eq 'gemini') {
     $geminiModels = @(
-        @{ Label = 'gemini-3-pro-preview'; Value = 'gemini-3-pro-preview' },
-        @{ Label = 'gemini-3-flash-preview'; Value = 'gemini-3-flash-preview' },
-        @{ Label = 'gemini-2.5-pro'; Value = 'gemini-2.5-pro' },
-        @{ Label = 'gemini-2.5-flash'; Value = 'gemini-2.5-flash' },
-        @{ Label = 'gemini-2.5-flash-lite'; Value = 'gemini-2.5-flash-lite' }
+        @{ Label = 'Use CLI configured/default model'; Value = 'configured' },
+        @{ Label = 'auto'; Value = 'auto' },
+        @{ Label = 'pro'; Value = 'pro' },
+        @{ Label = 'flash'; Value = 'flash' },
+        @{ Label = 'flash-lite'; Value = 'flash-lite' },
+        @{ Label = 'Enter model ID or alias'; Value = 'custom' }
     )
     $modelSelection = Resolve-ModelSelection -Provider $Provider -InputModel $Model -Choices $geminiModels -MenuTitle 'Select Gemini model'
 }
 
 else {
     $claudeModels = @(
+        @{ Label = 'Use CLI configured/default model'; Value = 'configured' },
         @{ Label = 'default'; Value = 'default' },
         @{ Label = 'sonnet'; Value = 'sonnet' },
         @{ Label = 'opus'; Value = 'opus' },
         @{ Label = 'haiku'; Value = 'haiku' },
         @{ Label = 'sonnet[1m]'; Value = 'sonnet[1m]' },
-        @{ Label = 'opusplan'; Value = 'opusplan' }
+        @{ Label = 'opusplan'; Value = 'opusplan' },
+        @{ Label = 'Enter model ID or alias'; Value = 'custom' }
     )
     $modelSelection = Resolve-ModelSelection -Provider $Provider -InputModel $Model -Choices $claudeModels -MenuTitle 'Select Claude model'
 }
