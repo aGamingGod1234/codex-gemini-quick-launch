@@ -4,7 +4,8 @@
   "description": "Cross-platform quick launchers for Codex, Gemini, and Claude CLIs.",
   "license": "MIT",
   "scripts": {
-    "postinstall": "node scripts/postinstall.js"
+    "postinstall": "node scripts/postinstall.js",
+    "test": "node --test --test-concurrency=1"
   },
   "bin": {
     "codexq": "bin/codex-quick-launch.js",
@@ -20,7 +21,7 @@
     "README.md"
   ],
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
   },
   "keywords": [
     "codex",

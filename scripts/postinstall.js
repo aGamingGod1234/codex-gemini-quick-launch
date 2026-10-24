@@ -30,8 +30,9 @@ function readFileText(filePath) {
 function readJson(filePath) {
   try {
     return JSON.parse(fs.readFileSync(filePath, 'utf8'));
-  } catch (_error) {
-    return null;
+  } catch (error) {
+    if (error.code === 'ENOENT') return {};
+    throw error;
   }
 }
 
@@ -41,55 +42,65 @@ function writeJson(filePath, value) {
 }
 
 function normalizeCommand(commandPath) {
-  return path.resolve(commandPath).replace(/\\/g, '/').toLowerCase();
+  const normalized = path.resolve(commandPath).replace(/\\/g, '/');
+  return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
 }
 
-function ensureHookEntry(settings, hookKey, commandPath) {
-  if (!settings[hookKey] || typeof settings[hookKey] !== 'object' || Array.isArray(settings[hookKey])) {
-    settings[hookKey] = {};
-  }
-  if (!Array.isArray(settings[hookKey].hooks)) {
-    settings[hookKey].hooks = [];
+function isObject(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function makeHookCommand(hookKey, commandPath) {
+  if (hookKey === 'UserPromptSubmit') {
+    // Claude's exec form passes paths literally, including spaces and shell metacharacters.
+    return { command: process.execPath, args: [commandPath] };
   }
 
-  const normalizedCommandPath = normalizeCommand(commandPath);
-  const hookName = 'cgl-auto-refine';
-  const existingIndex = settings[hookKey].hooks.findIndex((hook) => {
-    if (!hook || typeof hook !== 'object') {
-      return false;
-    }
-    if (hook.name === hookName) {
-      return true;
-    }
-    if (typeof hook.command === 'string' && normalizeCommand(hook.command) === normalizedCommandPath) {
-      return true;
-    }
-    return false;
-  });
-
-  const nextEntry = {
-    name: hookName,
-    command: commandPath,
+  // Gemini runs Bash on Unix and PowerShell on Windows.
+  const quote = process.platform === 'win32'
+    ? (value) => `'${value.replace(/'/g, "''")}'`
+    : (value) => `'${value.replace(/'/g, "'\\''")}'`;
+  return {
+    command: `${process.platform === 'win32' ? '& ' : ''}${quote(process.execPath)} ${quote(commandPath)}`,
   };
-
-  if (existingIndex >= 0) {
-    settings[hookKey].hooks[existingIndex] = {
-      ...settings[hookKey].hooks[existingIndex],
-      ...nextEntry,
-    };
-  } else {
-    settings[hookKey].hooks.push(nextEntry);
-  }
 }
 
-function ensureHookSettings(settingsPath, hookKey, commandPath) {
-  const settings = readJson(settingsPath) || {};
-  if (!settings.hooks || typeof settings.hooks !== 'object' || Array.isArray(settings.hooks)) {
-    settings.hooks = {};
+function ensureHookEntry(settings, hookKey, commandPath, legacyPath) {
+  const event = settings[hookKey];
+  const groups = event === undefined ? [] : (Array.isArray(event) ? event : [event]);
+  if (groups.some((group) => !isObject(group) || !Array.isArray(group.hooks)
+      || group.hooks.some((hook) => !isObject(hook)))) {
+    throw new Error(`Invalid hooks.${hookKey}; existing settings left unchanged`);
   }
 
-  ensureHookEntry(settings.hooks, hookKey, commandPath);
-  writeJson(settingsPath, settings);
+  const nextEntry = { name: 'cgl-auto-refine', type: 'command', ...makeHookCommand(hookKey, commandPath) };
+  const ownedPaths = [commandPath, legacyPath].map(normalizeCommand);
+  let found = false;
+  settings[hookKey] = groups.map((group) => ({
+    ...group,
+    hooks: group.hooks.map((hook) => {
+      const owned = hook.name === nextEntry.name
+        || hook.command === nextEntry.command && JSON.stringify(hook.args) === JSON.stringify(nextEntry.args)
+        || typeof hook.command === 'string' && ownedPaths.includes(normalizeCommand(hook.command));
+      if (!owned) return hook;
+      found = true;
+      const updated = { ...hook, ...nextEntry };
+      if (!nextEntry.args) delete updated.args;
+      return updated;
+    }),
+  }));
+  if (!found) settings[hookKey].push({ hooks: [nextEntry] });
+}
+
+function prepareHookSettings(settingsPath, hookKey, commandPath, legacyPath) {
+  const settings = readJson(settingsPath);
+  if (!isObject(settings) || (settings.hooks !== undefined && !isObject(settings.hooks))) {
+    throw new Error('Invalid settings object; existing settings left unchanged');
+  }
+
+  if (settings.hooks === undefined) settings.hooks = {};
+  ensureHookEntry(settings.hooks, hookKey, commandPath, legacyPath);
+  return settings;
 }
 
 function pointsToQuickLaunch(filePath, quickScriptName) {
@@ -152,11 +163,12 @@ function removeLegacyStartMenuEntries() {
     'Start Menu',
     'Programs',
   );
-  const legacyFiles = ['codex.bat', 'gemini.bat', 'claude.bat', 'codex.lnk', 'gemini.lnk', 'claude.lnk'];
+  // A generic shortcut name does not establish ownership; leave binary .lnk files alone.
+  const legacyFiles = ['codex.bat', 'gemini.bat', 'claude.bat'];
   const removed = [];
   for (const fileName of legacyFiles) {
     const filePath = path.join(startMenuPrograms, fileName);
-    if (fs.existsSync(filePath)) {
+    if (pointsToQuickLaunch(filePath, `${path.basename(fileName, '.bat')}-quick-launch.js`)) {
       fs.unlinkSync(filePath);
       removed.push(fileName);
     }
@@ -164,17 +176,26 @@ function removeLegacyStartMenuEntries() {
   return removed;
 }
 
-function installClaudeRefineHook(packageRoot) {
+function installRefineHook(packageRoot, client, hookKey) {
   if (process.env.CGL_DISABLE_REFINE === '1') {
     return;
   }
 
   const homeDir = os.homedir();
-  const scriptSource = path.join(packageRoot, 'scripts', 'refine', 'claude-hook.js');
+  const scriptSource = path.join(packageRoot, 'scripts', 'refine', `${client}-hook.js`);
   const commonSource = path.join(packageRoot, 'scripts', 'refine', 'common.js');
-  const hookDir = path.join(homeDir, '.claude', 'hooks');
+  const clientDir = path.join(homeDir, `.${client}`);
+  const hookDir = path.join(clientDir, 'hooks', 'codex-gemini-quick-launch');
   const hookScriptPath = path.join(hookDir, 'cgl-refine.js');
   const hookCommonPath = path.join(hookDir, 'common.js');
+  const settingsPath = path.join(clientDir, 'settings.json');
+  let settings;
+  try {
+    settings = prepareHookSettings(settingsPath, hookKey, hookScriptPath, path.join(clientDir, 'hooks', 'cgl-refine.js'));
+  } catch (error) {
+    console.warn(`codex-gemini-quick-launch: skipped ${client} hook installation (${settingsPath}): ${error.message}`);
+    return;
+  }
 
   fs.mkdirSync(hookDir, { recursive: true });
   fs.copyFileSync(scriptSource, hookScriptPath);
@@ -186,34 +207,15 @@ function installClaudeRefineHook(packageRoot) {
     // Ignore chmod failures on unsupported filesystems.
   }
 
-  const settingsPath = path.join(homeDir, '.claude', 'settings.json');
-  ensureHookSettings(settingsPath, 'UserPromptSubmit', hookScriptPath);
+  writeJson(settingsPath, settings);
+}
+
+function installClaudeRefineHook(packageRoot) {
+  installRefineHook(packageRoot, 'claude', 'UserPromptSubmit');
 }
 
 function installGeminiRefineHook(packageRoot) {
-  if (process.env.CGL_DISABLE_REFINE === '1') {
-    return;
-  }
-
-  const homeDir = os.homedir();
-  const scriptSource = path.join(packageRoot, 'scripts', 'refine', 'gemini-hook.js');
-  const commonSource = path.join(packageRoot, 'scripts', 'refine', 'common.js');
-  const hookDir = path.join(homeDir, '.gemini', 'hooks');
-  const hookScriptPath = path.join(hookDir, 'cgl-refine.js');
-  const hookCommonPath = path.join(hookDir, 'common.js');
-
-  fs.mkdirSync(hookDir, { recursive: true });
-  fs.copyFileSync(scriptSource, hookScriptPath);
-  fs.copyFileSync(commonSource, hookCommonPath);
-  try {
-    fs.chmodSync(hookScriptPath, 0o755);
-    fs.chmodSync(hookCommonPath, 0o644);
-  } catch (_error) {
-    // Ignore chmod failures on unsupported filesystems.
-  }
-
-  const settingsPath = path.join(homeDir, '.gemini', 'settings.json');
-  ensureHookSettings(settingsPath, 'BeforeAgent', hookScriptPath);
+  installRefineHook(packageRoot, 'gemini', 'BeforeAgent');
 }
 
 function installCodexAgentsHomeSnippet(packageRoot) {

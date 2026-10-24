@@ -130,6 +130,7 @@ function formatNotice(config, remoteState, reason) {
 }
 
 async function checkForUpdate(config) {
+  if (process.env.CGL_SKIP_UPDATE === '1') return null;
   const stateFile = getStateFile(config.packageName);
   const state = safeReadJson(stateFile) || {};
   const now = Date.now();
